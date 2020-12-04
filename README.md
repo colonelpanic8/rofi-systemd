@@ -5,7 +5,7 @@ the user and system sessions.
 
 ## Installation
 
-The only dependencies of rofi-systemd are rofi, systemd, awk and column.
+The only dependencies of rofi-systemd are rofi, systemd, awk, jq and column.
 
 ## Logs
 
