@@ -2,6 +2,7 @@
 
 term=${ROFI_SYSTEMD_TERM-urxvt -e}
 default_action=${ROFI_SYSTEMD_DEFAULT_ACTION-"list_actions"}
+rofi_command=${ROFI_SYSTEMD_ROFI_COMMAND-"rofi -dmenu -i -p"}
 
 function call_systemd_dbus {
 	busctl call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
@@ -17,7 +18,7 @@ function running_units {
 }
 
 function get_units {
-	// XXX: unit files is no longer used here because it does not seem to be necessary
+	# XXX: unit files is no longer used here because it does not seem to be necessary
 	{ running_units "--$1"; } | sort -u -k1,1 |
 		awk -v unit_type="$1" '{print $0 " " unit_type}'
 }
@@ -37,7 +38,7 @@ tail
 list_actions"
 
 function select_service_and_act {
-	result=$(rofi -dmenu -i -p "systemd unit: " \
+	result=$($rofi_command "systemd unit: " \
 	              -kb-custom-1 "${enable}" \
 	              -kb-custom-2 "${disable}" \
 	              -kb-custom-3 "${stop}" \
@@ -106,7 +107,7 @@ function get_command_with_args {
 			echo "journalctl $user_arg -u '$service_name' -f"
 			;;
 		"list_actions")
-			action=$(echo "$all_actions" | rofi -dmenu -i -p "Select action: ")
+			action=$(echo "$all_actions" | $rofi_command "Select action: ")
 			get_command_with_args
 			;;
 		*)
