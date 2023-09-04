@@ -8,35 +8,35 @@ files_jquery_columns=${ROFI_SYSTEMD_FILES_JQ_COLUMNS-'(.[0] + " " + .[1])'}
 running_jquery_columns=${ROFI_SYSTEMD_RUNNING_JQ_COLUMNS-'(.[0] + " " + .[3])'}
 get_units_strategy=${ROFI_SYSTEMD_GET_UNITS_STRATEGY-files}
 
-function truncate {
+truncate() {
 	awk '{print substr($0, length($0)-'$truncate_length')}'
 }
 
-function call_systemd_dbus {
+call_systemd_dbus() {
 	busctl call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
 		   org.freedesktop.systemd1.Manager "$@" --json=short
 }
 
-function unit_files {
+unit_files() {
 	call_systemd_dbus ListUnitFiles "$1" | jq ".data[][] | $files_jquery_columns" -r | \
 		awk -F'/' '{print $NF}'
 }
 
-function running_units {
+running_units() {
 	call_systemd_dbus ListUnits "$1" | jq ".data[][] | $running_jquery_columns" -r
 }
 
-function get_units {
+get_units() {
 	{ running_units "--$1";  } | sort -u -k1,1 | truncate |
 		awk -v unit_type="$1" '{print $0 " " unit_type}'
 }
 
-function get_unit_files {
+get_unit_files() {
 	{ unit_files "--$1";  } | sort -u -k1,1 | truncate |
 		awk -v unit_type="$1" '{print $0 " " unit_type}'
 }
 
-function all_units {
+all_units() {
 	case "$get_units_strategy" in
 		"files")
 			{ get_unit_files user; get_unit_files system; } | column -tc 1
@@ -66,7 +66,7 @@ tail
 boot_logs
 list_actions"
 
-function select_service_and_act {
+select_service_and_act() {
 	result=$($rofi_command "systemd unit: " \
 	              -kb-custom-1 "${enable}" \
 	              -kb-custom-2 "${disable}" \
@@ -135,7 +135,7 @@ function select_service_and_act {
 	eval "$to_run"
 }
 
-function get_command_with_args {
+get_command_with_args() {
 	case "$action" in
 		"tail")
 			echo "journalctl $user_arg -u '$service_name' -f"
