@@ -5,7 +5,8 @@ the user and system sessions.
 
 ## Installation
 
-The only dependencies of rofi-systemd are rofi, systemd, awk, jq and column.
+The required dependencies are rofi, systemd, jq, and less. The script also uses
+standard POSIX tools such as `cut`, `sed`, `sort`, and `wc`.
 
 ## Development
 
@@ -45,7 +46,13 @@ You can trigger an action other than the default action by using the following k
  - enable="Alt+e"
  - disable="Alt+d"
  - stop="Alt+k"
- - status="Alt+s"
  - restart="Alt+r"
  - tail="Alt+t"
  - boot_logs="Alt+l"
+
+## Notes
+
+- Selection is index-based, so truncated display text no longer changes which
+  unit the script acts on.
+- System `status` is queried without `sudo`, while mutating system unit actions
+  and system journal access still use `sudo`.
