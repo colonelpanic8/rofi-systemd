@@ -7,6 +7,17 @@ the user and system sessions.
 
 The only dependencies of rofi-systemd are rofi, systemd, awk, jq and column.
 
+## Development
+
+This repository includes a Nix flake-based development shell. If you use
+`direnv`, run `direnv allow` once in the repository to load it automatically.
+
+You can also enter the environment manually with:
+
+```sh
+nix develop
+```
+
 ## Logs
 
 To display logs using journalctl when rofi-systemd is not started from a tty,
