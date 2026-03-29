@@ -22,8 +22,10 @@ to a different action, i.e. one of:
  - enable
  - disable
  - stop
+ - status
  - restart
  - tail
+ - boot_logs
  - list_actions
 
 ## Keybindings
@@ -32,5 +34,7 @@ You can trigger an action other than the default action by using the following k
  - enable="Alt+e"
  - disable="Alt+d"
  - stop="Alt+k"
+ - status="Alt+s"
  - restart="Alt+r"
  - tail="Alt+t"
+ - boot_logs="Alt+l"
