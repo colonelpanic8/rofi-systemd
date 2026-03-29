@@ -54,6 +54,7 @@ all_units() {
 enable="Alt+e"
 disable="Alt+d"
 stop="Alt+k"
+status="Alt+s"
 restart="Alt+r"
 tail="Alt+t"
 boot_logs="Alt+l"
@@ -72,9 +73,10 @@ select_service_and_act() {
 	              -kb-custom-1 "${enable}" \
 	              -kb-custom-2 "${disable}" \
 	              -kb-custom-3 "${stop}" \
-	              -kb-custom-4 "${restart}" \
-	              -kb-custom-5 "${tail}" \
-				  -kb-custom-6 "${boot_logs}")
+	              -kb-custom-4 "${status}" \
+	              -kb-custom-5 "${restart}" \
+	              -kb-custom-6 "${tail}" \
+				  -kb-custom-7 "${boot_logs}")
 
 	rofi_exit="$?"
 
@@ -93,15 +95,18 @@ select_service_and_act() {
 			action="stop"
 			;;
 		13)
-			action="restart"
+			action="status"
 			;;
 		14)
-			action="tail"
+			action="restart"
 			;;
 		15)
-			action="boot_logs"
+			action="tail"
 			;;
 		16)
+			action="boot_logs"
+			;;
+		17)
 			action="list_actions"
 			;;
 		*)
