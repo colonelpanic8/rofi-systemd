@@ -1,63 +1,111 @@
 #!/usr/bin/env sh
 
 term=${ROFI_SYSTEMD_TERM-urxvt -e}
-default_action=${ROFI_SYSTEMD_DEFAULT_ACTION-"list_actions"}
+default_action=${ROFI_SYSTEMD_DEFAULT_ACTION-list_actions}
 rofi_command=${ROFI_SYSTEMD_ROFI_COMMAND-"rofi $@ -dmenu -i -p"}
 truncate_length=${ROFI_SYSTEMD_TRUNCATE_LENGTH-60}
-files_jquery_columns=${ROFI_SYSTEMD_FILES_JQ_COLUMNS-'(.[0] + " " + .[1])'}
-running_jquery_columns=${ROFI_SYSTEMD_RUNNING_JQ_COLUMNS-'(.[0] + " " + .[3])'}
 get_units_strategy=${ROFI_SYSTEMD_GET_UNITS_STRATEGY-files}
 
-truncate() {
-	awk '{print substr($0, length($0)-'$truncate_length')}'
+tab=$(printf '\t')
+script_dir=$(CDPATH=; cd -- "$(dirname -- "$0")" && pwd)
+script_path=$script_dir/$(basename -- "$0")
+
+truncate_display() {
+	text=$1
+
+	case "$truncate_length" in
+		''|*[!0-9]*)
+			printf '%s\n' "$text"
+			return
+			;;
+	esac
+
+	if [ "$truncate_length" -le 0 ]; then
+		printf '%s\n' "$text"
+		return
+	fi
+
+	text_length=$(printf '%s' "$text" | wc -m | tr -d ' ')
+	if [ "$text_length" -le "$truncate_length" ]; then
+		printf '%s\n' "$text"
+		return
+	fi
+
+	if [ "$truncate_length" -le 3 ]; then
+		printf '%s' "$text" | cut -c "1-$truncate_length"
+		printf '\n'
+		return
+	fi
+
+	visible_length=$((truncate_length - 3))
+	printf '%s...\n' "$(printf '%s' "$text" | cut -c "1-$visible_length")"
 }
 
 call_systemd_dbus() {
-	busctl call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
-		   org.freedesktop.systemd1.Manager "$@" --json=short
+	scope=$1
+	shift
+	busctl "$scope" call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+		org.freedesktop.systemd1.Manager "$@" --json=short
 }
 
 unit_files() {
-	call_systemd_dbus ListUnitFiles "$1" | jq ".data[][] | $files_jquery_columns" -r | \
-		awk -F'/' '{print $NF}'
+	call_systemd_dbus "--$1" ListUnitFiles | jq -r '.data[][] | [.[0], .[1]] | @tsv'
 }
 
 running_units() {
-	call_systemd_dbus ListUnits "$1" | jq ".data[][] | $running_jquery_columns" -r
+	call_systemd_dbus "--$1" ListUnits | jq -r '.data[][] | [.[0], .[3]] | @tsv'
+}
+
+format_unit_entry() {
+	manager=$1
+	unit_name=$2
+	unit_status=$3
+	display_unit=$(truncate_display "$unit_name")
+
+	printf '[%s] %s (%s)\t%s\t%s\n' \
+		"$manager" "$display_unit" "$unit_status" "$unit_name" "$manager"
 }
 
 get_units() {
-	{ running_units "--$1";  } | sort -u -k1,1 | truncate |
-		awk -v unit_type="$1" '{print $0 " " unit_type}'
+	manager=$1
+
+	running_units "$manager" |
+		sort -u -t "$tab" -k1,1 |
+		while IFS="$tab" read -r unit_name unit_status; do
+			format_unit_entry "$manager" "$unit_name" "$unit_status"
+		done
 }
 
 get_unit_files() {
-	{ unit_files "--$1";  } | sort -u -k1,1 | truncate |
-		awk -v unit_type="$1" '{print $0 " " unit_type}'
+	manager=$1
+
+	unit_files "$manager" |
+		sort -u -t "$tab" -k1,1 |
+		while IFS="$tab" read -r unit_name unit_status; do
+			format_unit_entry "$manager" "$unit_name" "$unit_status"
+		done
 }
 
 all_units() {
 	case "$get_units_strategy" in
-		"files")
-			{ get_unit_files user; get_unit_files system; } | column -tc 1
+		files)
+			{ get_unit_files user; get_unit_files system; }
 			;;
-		"units")
-			{ get_units user; get_units system; } | column -tc 1
+		units)
+			{ get_units user; get_units system; }
 			;;
 		*)
-			{ get_units user; get_units system; } | column -tc 1
-			{ get_unit_files user; get_unit_files system; } | column -tc 1
+			{ get_units user; get_units system; get_unit_files user; get_unit_files system; }
 			;;
-	esac
+	esac | sort -u -t "$tab" -k2,3
 }
 
-enable="Alt+e"
-disable="Alt+d"
-stop="Alt+k"
-status="Alt+s"
-restart="Alt+r"
-tail="Alt+t"
-boot_logs="Alt+l"
+enable_key="Alt+e"
+disable_key="Alt+d"
+stop_key="Alt+k"
+restart_key="Alt+r"
+tail_key="Alt+t"
+boot_logs_key="Alt+l"
 
 all_actions="enable
 disable
@@ -68,95 +116,178 @@ tail
 boot_logs
 list_actions"
 
-select_service_and_act() {
-	result=$($rofi_command "systemd unit: " \
-	              -kb-custom-1 "${enable}" \
-	              -kb-custom-2 "${disable}" \
-	              -kb-custom-3 "${stop}" \
-	              -kb-custom-4 "${status}" \
-	              -kb-custom-5 "${restart}" \
-	              -kb-custom-6 "${tail}" \
-				  -kb-custom-7 "${boot_logs}")
+select_action() {
+	# shellcheck disable=SC2086
+	printf '%s\n' "$all_actions" | $rofi_command "Select action: " -no-custom
+}
 
-	rofi_exit="$?"
+run_systemctl() {
+	manager=$1
+	verb=$2
+	shift 2
+
+	case "$manager" in
+		user)
+			systemctl --user "$verb" "$@"
+			;;
+		system)
+			case "$verb" in
+				enable|disable|stop|restart|reload|start|mask|unmask)
+					sudo systemctl --system "$verb" "$@"
+					;;
+				*)
+					systemctl --system "$verb" "$@"
+					;;
+			esac
+			;;
+		*)
+			printf 'Unknown manager: %s\n' "$manager" >&2
+			return 1
+			;;
+	esac
+}
+
+run_journalctl() {
+	manager=$1
+	unit_name=$2
+	shift 2
+
+	case "$manager" in
+		user)
+			journalctl --user-unit="$unit_name" "$@"
+			;;
+		system)
+			sudo journalctl --unit="$unit_name" "$@"
+			;;
+		*)
+			printf 'Unknown manager: %s\n' "$manager" >&2
+			return 1
+			;;
+	esac
+}
+
+execute_action() {
+	case "$action" in
+		enable|disable|stop|restart)
+			command_status=0
+			run_systemctl "$manager" "$action" -- "$service_name" || command_status=$?
+			printf '\n'
+			SYSTEMD_COLORS=1 run_systemctl "$manager" status --no-pager -- "$service_name" || true
+			return "$command_status"
+			;;
+		status)
+			SYSTEMD_COLORS=1 run_systemctl "$manager" status --no-pager -- "$service_name"
+			;;
+		tail)
+			run_journalctl "$manager" "$service_name" -f
+			;;
+		boot_logs)
+			run_journalctl "$manager" "$service_name" --boot
+			;;
+		*)
+			printf 'Unknown action: %s\n' "$action" >&2
+			return 1
+			;;
+	esac
+}
+
+launch_in_terminal() {
+	exec sh -c "exec $term \"\$@\"" sh "$script_path" --run-action \
+		"$action" "$service_name" "$manager"
+}
+
+run_action_with_output() {
+	if [ ! -t 1 ]; then
+		launch_in_terminal
+	fi
+
+	case "$action" in
+		tail)
+			execute_action
+			;;
+		*)
+			execute_action | less -R
+			;;
+	esac
+}
+
+select_service_and_act() {
+	menu_entries=$1
+
+	# shellcheck disable=SC2086
+	result=$(printf '%s\n' "$menu_entries" | cut -f1 | $rofi_command "systemd unit: " \
+		-format i -no-custom \
+		-kb-custom-1 "${enable_key}" \
+		-kb-custom-2 "${disable_key}" \
+		-kb-custom-3 "${stop_key}" \
+		-kb-custom-4 "${restart_key}" \
+		-kb-custom-5 "${tail_key}" \
+		-kb-custom-6 "${boot_logs_key}")
+
+	rofi_exit=$?
 
 	case "$rofi_exit" in
 		1)
-			action="exit"
 			exit 1
 			;;
 		10)
-			action="enable"
+			action='enable'
 			;;
 		11)
-			action="disable"
+			action='disable'
 			;;
 		12)
-			action="stop"
+			action='stop'
 			;;
 		13)
-			action="status"
+			action='restart'
 			;;
 		14)
-			action="restart"
+			action='tail'
 			;;
 		15)
-			action="tail"
+			action='boot_logs'
 			;;
 		16)
-			action="boot_logs"
-			;;
-		17)
-			action="list_actions"
+			action='list_actions'
 			;;
 		*)
-			action="$default_action"
+			action=$default_action
 			;;
 	esac
 
-	selection="$(echo $result | sed -n 's/ \+/ /gp')"
-	service_name=$(echo "$selection" | awk '{ print $1 }' | tr -d ' ')
-	is_user="$(echo $selection | awk '{ print $3 }' )"
+	selection_line=$(printf '%s\n' "$menu_entries" | sed -n "$((result + 1))p")
+	IFS="$tab" read -r _display_name service_name manager <<EOF
+$selection_line
+EOF
 
-	case "$is_user" in
-		user*)
-			user_arg="--user"
-			command="systemctl $user_arg"
-			;;
-		system*)
-			user_arg=""
-			command="sudo systemctl"
-			;;
-		*)
-			command="systemctl"
-	esac
-
-	to_run="$(get_command_with_args)"
-	if [ ! -t 1 ] && [[ "$to_run" = *"journalctl"* ]]; then
-		to_run="$term $to_run"
-	else
-		to_run="$to_run | less"
+	if [ -z "$service_name" ] || [ -z "$manager" ]; then
+		printf 'Unable to parse selection.\n' >&2
+		exit 1
 	fi
-	echo "Running $to_run"
-	eval "$to_run"
+
+	if [ "$action" = list_actions ]; then
+		action=$(select_action) || exit 1
+		[ -n "$action" ] || exit 1
+	fi
+
+	run_action_with_output
 }
 
-get_command_with_args() {
-	case "$action" in
-		"tail")
-			echo "journalctl $user_arg -u '$service_name' -f"
-			;;
-		"boot_logs")
-			echo "journalctl $user_arg -u '$service_name' --boot"
-			;;
-		"list_actions")
-			action=$(echo "$all_actions" | $rofi_command "Select action: ")
-			get_command_with_args
-			;;
-		*)
-			echo "$command $action '$service_name'"
-			;;
-	esac
-}
+if [ "$1" = --run-action ]; then
+	action=$2
+	service_name=$3
+	manager=$4
 
-all_units | select_service_and_act
+	if [ -z "$action" ] || [ -z "$service_name" ] || [ -z "$manager" ]; then
+		printf 'Usage: %s --run-action ACTION UNIT MANAGER\n' "$0" >&2
+		exit 1
+	fi
+
+	run_action_with_output
+	exit $?
+fi
+
+menu_entries=$(all_units)
+[ -n "$menu_entries" ] || exit 1
+select_service_and_act "$menu_entries"
