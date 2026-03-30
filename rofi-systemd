@@ -197,7 +197,7 @@ launch_in_terminal() {
 }
 
 run_action_with_output() {
-	if [ ! -t 1 ]; then
+	if [ -z "${ROFI_SYSTEMD_FORCE_INLINE-}" ] && [ ! -t 1 ]; then
 		launch_in_terminal
 	fi
 
