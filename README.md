@@ -5,8 +5,8 @@ the user and system sessions.
 
 ## Installation
 
-The required dependencies are rofi, systemd, jq, and less. The script also uses
-standard POSIX tools such as `cut`, `sed`, `sort`, and `wc`.
+rofi-systemd depends on rofi, systemd, jq, and less, plus core POSIX
+utilities such as `cut`, `sed`, `sort`, `tr`, and `wc`.
 
 ## Development
 
