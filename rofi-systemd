@@ -97,7 +97,7 @@ all_units() {
 		*)
 			{ get_units user; get_units system; get_unit_files user; get_unit_files system; }
 			;;
-	esac | sort -u -t "$tab" -k2,3
+	esac
 }
 
 enable_key="Alt+e"
@@ -212,17 +212,26 @@ run_action_with_output() {
 }
 
 select_service_and_act() {
-	menu_entries=$1
+	menu_entries_file=$(mktemp)
+
+	cleanup_menu_entries_file() {
+		rm -f "$menu_entries_file"
+	}
+
+	trap 'cleanup_menu_entries_file' EXIT HUP INT TERM
 
 	# shellcheck disable=SC2086
-	result=$(printf '%s\n' "$menu_entries" | cut -f1 | $rofi_command "systemd unit: " \
-		-format i -no-custom \
-		-kb-custom-1 "${enable_key}" \
-		-kb-custom-2 "${disable_key}" \
-		-kb-custom-3 "${stop_key}" \
-		-kb-custom-4 "${restart_key}" \
-		-kb-custom-5 "${tail_key}" \
-		-kb-custom-6 "${boot_logs_key}")
+	result=$(all_units |
+		tee "$menu_entries_file" |
+		cut -f1 |
+		$rofi_command "systemd unit: " \
+			-format i -no-custom \
+			-kb-custom-1 "${enable_key}" \
+			-kb-custom-2 "${disable_key}" \
+			-kb-custom-3 "${stop_key}" \
+			-kb-custom-4 "${restart_key}" \
+			-kb-custom-5 "${tail_key}" \
+			-kb-custom-6 "${boot_logs_key}")
 
 	rofi_exit=$?
 
@@ -256,7 +265,14 @@ select_service_and_act() {
 			;;
 	esac
 
-	selection_line=$(printf '%s\n' "$menu_entries" | sed -n "$((result + 1))p")
+	case "$result" in
+		''|*[!0-9]*)
+			printf 'Unable to parse selection index.\n' >&2
+			exit 1
+			;;
+	esac
+
+	selection_line=$(sed -n "$((result + 1))p" "$menu_entries_file")
 	IFS="$tab" read -r _display_name service_name manager <<EOF
 $selection_line
 EOF
@@ -288,6 +304,4 @@ if [ "$1" = --run-action ]; then
 	exit $?
 fi
 
-menu_entries=$(all_units)
-[ -n "$menu_entries" ] || exit 1
-select_service_and_act "$menu_entries"
+select_service_and_act
