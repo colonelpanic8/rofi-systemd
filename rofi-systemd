@@ -5,41 +5,13 @@ default_action=${ROFI_SYSTEMD_DEFAULT_ACTION-list_actions}
 rofi_command=${ROFI_SYSTEMD_ROFI_COMMAND-"rofi $@ -dmenu -i -p"}
 truncate_length=${ROFI_SYSTEMD_TRUNCATE_LENGTH-60}
 get_units_strategy=${ROFI_SYSTEMD_GET_UNITS_STRATEGY-files}
+manager_column_width=${ROFI_SYSTEMD_MANAGER_COLUMN_WIDTH-8}
+unit_column_width=${ROFI_SYSTEMD_UNIT_COLUMN_WIDTH-$truncate_length}
+status_column_width=${ROFI_SYSTEMD_STATUS_COLUMN_WIDTH-18}
 
 tab=$(printf '\t')
 script_dir=$(CDPATH=; cd -- "$(dirname -- "$0")" && pwd)
 script_path=$script_dir/$(basename -- "$0")
-
-truncate_display() {
-	text=$1
-
-	case "$truncate_length" in
-		''|*[!0-9]*)
-			printf '%s\n' "$text"
-			return
-			;;
-	esac
-
-	if [ "$truncate_length" -le 0 ]; then
-		printf '%s\n' "$text"
-		return
-	fi
-
-	text_length=$(printf '%s' "$text" | wc -m | tr -d ' ')
-	if [ "$text_length" -le "$truncate_length" ]; then
-		printf '%s\n' "$text"
-		return
-	fi
-
-	if [ "$truncate_length" -le 3 ]; then
-		printf '%s' "$text" | cut -c "1-$truncate_length"
-		printf '\n'
-		return
-	fi
-
-	visible_length=$((truncate_length - 3))
-	printf '%s...\n' "$(printf '%s' "$text" | cut -c "1-$visible_length")"
-}
 
 call_systemd_dbus() {
 	scope=$1
@@ -56,14 +28,60 @@ running_units() {
 	call_systemd_dbus "--$1" ListUnits | jq -r '.data[][] | [.[0], .[3]] | @tsv'
 }
 
-format_unit_entry() {
+format_units() {
 	manager=$1
-	unit_name=$2
-	unit_status=$3
-	display_unit=$(truncate_display "$unit_name")
 
-	printf '[%s] %s (%s)\t%s\t%s\n' \
-		"$manager" "$display_unit" "$unit_status" "$unit_name" "$manager"
+	awk \
+		-F "$tab" \
+		-v manager="$manager" \
+		-v manager_column_width="$manager_column_width" \
+		-v unit_column_width="$unit_column_width" \
+		-v status_column_width="$status_column_width" \
+		-v tab="$tab" \
+		-v truncate_length="$truncate_length" '
+		function normalize_unit_name(unit_name) {
+			sub(/^.*\//, "", unit_name)
+			return unit_name
+		}
+
+		function truncate_display(text, limit, visible_length) {
+			if (limit !~ /^[0-9]+$/ || limit <= 0) {
+				return text
+			}
+
+			if (length(text) <= limit) {
+				return text
+			}
+
+			if (limit <= 3) {
+				return substr(text, 1, limit)
+			}
+
+			visible_length = limit - 3
+			return substr(text, 1, visible_length) "..."
+		}
+
+		function fit_column(text, width) {
+			if (width !~ /^[0-9]+$/ || width <= 0) {
+				return text
+			}
+
+			text = truncate_display(text, width)
+			return sprintf("%-" width "s", text)
+		}
+
+		{
+			unit_name = $1
+			unit_status = $2
+			normalized_unit_name = normalize_unit_name(unit_name)
+			display_manager = fit_column("[" manager "]", manager_column_width)
+			display_unit = fit_column(normalized_unit_name, unit_column_width)
+			display_status = fit_column("(" unit_status ")", status_column_width)
+
+			printf "%s %s %s%s%s%s%s\n", \
+				display_manager, display_unit, display_status, tab, normalized_unit_name, tab, manager
+		}
+	'
 }
 
 get_units() {
@@ -71,9 +89,7 @@ get_units() {
 
 	running_units "$manager" |
 		sort -u -t "$tab" -k1,1 |
-		while IFS="$tab" read -r unit_name unit_status; do
-			format_unit_entry "$manager" "$unit_name" "$unit_status"
-		done
+		format_units "$manager"
 }
 
 get_unit_files() {
@@ -81,9 +97,7 @@ get_unit_files() {
 
 	unit_files "$manager" |
 		sort -u -t "$tab" -k1,1 |
-		while IFS="$tab" read -r unit_name unit_status; do
-			format_unit_entry "$manager" "$unit_name" "$unit_status"
-		done
+		format_units "$manager"
 }
 
 all_units() {

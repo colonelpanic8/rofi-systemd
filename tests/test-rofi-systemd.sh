@@ -99,7 +99,8 @@ exit_code_var="TEST_ROFI_EXIT_CODE_$count"
 eval "response=\${$response_var-}"
 eval "exit_code=\${$exit_code_var-0}"
 
-cat >/dev/null
+printf '=== invocation %s ===\n' "$count" >>"$TEST_LOG_DIR/rofi-stdin.log"
+cat >>"$TEST_LOG_DIR/rofi-stdin.log"
 
 printf '%s' "$response"
 exit "$exit_code"
@@ -155,6 +156,7 @@ export TEST_STATE_DIR="$STATE_DIR"
 reset_state() {
   : >"$LOG_DIR/busctl.log"
   : >"$LOG_DIR/rofi.log"
+  : >"$LOG_DIR/rofi-stdin.log"
   : >"$LOG_DIR/systemctl.log"
   : >"$LOG_DIR/journalctl.log"
   : >"$LOG_DIR/sudo.log"
@@ -175,6 +177,17 @@ assert_contains() {
   local needle=$2
   if ! grep -F -- "$needle" "$file" >/dev/null; then
     echo "expected to find in $file: $needle" >&2
+    echo "--- $file ---" >&2
+    cat "$file" >&2
+    exit 1
+  fi
+}
+
+assert_not_contains() {
+  local file=$1
+  local needle=$2
+  if grep -F -- "$needle" "$file" >/dev/null; then
+    echo "expected not to find in $file: $needle" >&2
     echo "--- $file ---" >&2
     cat "$file" >&2
     exit 1
@@ -240,6 +253,52 @@ test_selection_uses_full_unit_name() {
   assert_contains "$LOG_DIR/systemctl.log" "--system status --no-pager -- very-long-unit-name-that-would-have-been-truncated-by-the-old-script.service"
 }
 
+test_unit_file_display_uses_basename_only() {
+  reset_state
+  export ROFI_SYSTEMD_GET_UNITS_STRATEGY=files
+  export TEST_BUSCTL_USER_UNIT_FILES_JSON='{"type":"a(ss)","data":[[]]}'
+  export TEST_BUSCTL_SYSTEM_UNIT_FILES_JSON='{"type":"a(ss)","data":[[["/etc/systemd/system/demo.service","enabled"]]]}'
+  export TEST_ROFI_RESPONSE_1=0
+  export TEST_ROFI_EXIT_CODE_1=13
+
+  run_inline
+
+  assert_contains "$LOG_DIR/rofi-stdin.log" "demo.service"
+  assert_not_contains "$LOG_DIR/rofi-stdin.log" "[system] /etc/systemd/system/demo.service (enabled)"
+  assert_contains "$LOG_DIR/systemctl.log" "--system restart -- demo.service"
+}
+
+test_menu_uses_fixed_width_columns() {
+  reset_state
+  export ROFI_SYSTEMD_GET_UNITS_STRATEGY=files
+  export ROFI_SYSTEMD_MANAGER_COLUMN_WIDTH=8
+  export ROFI_SYSTEMD_UNIT_COLUMN_WIDTH=16
+  export ROFI_SYSTEMD_STATUS_COLUMN_WIDTH=12
+  export TEST_BUSCTL_USER_UNIT_FILES_JSON='{"type":"a(ss)","data":[[]]}'
+  export TEST_BUSCTL_SYSTEM_UNIT_FILES_JSON='{"type":"a(ss)","data":[[["/etc/systemd/system/demo.service","enabled"]]]}'
+  export TEST_ROFI_RESPONSE_1=0
+  export TEST_ROFI_EXIT_CODE_1=13
+
+  run_inline
+
+  assert_contains "$LOG_DIR/rofi-stdin.log" "[system] demo.service     (enabled)"
+}
+
+test_default_status_column_does_not_truncate_known_statuses() {
+  reset_state
+  export ROFI_SYSTEMD_GET_UNITS_STRATEGY=files
+  export ROFI_SYSTEMD_UNIT_COLUMN_WIDTH=16
+  export TEST_BUSCTL_USER_UNIT_FILES_JSON='{"type":"a(ss)","data":[[]]}'
+  export TEST_BUSCTL_SYSTEM_UNIT_FILES_JSON='{"type":"a(ss)","data":[[["/etc/systemd/system/demo.service","enabled-runtime"]]]}'
+  export TEST_ROFI_RESPONSE_1=0
+  export TEST_ROFI_EXIT_CODE_1=13
+
+  run_inline
+
+  assert_contains "$LOG_DIR/rofi-stdin.log" "(enabled-runtime)"
+  assert_not_contains "$LOG_DIR/rofi-stdin.log" "(enabled-runt...)"
+}
+
 test_system_status_avoids_sudo() {
   reset_state
   run_inline --run-action status demo.service system
@@ -299,6 +358,9 @@ test_rofi_starts_before_unit_enumeration_finishes() {
 }
 
 test_selection_uses_full_unit_name
+test_unit_file_display_uses_basename_only
+test_menu_uses_fixed_width_columns
+test_default_status_column_does_not_truncate_known_statuses
 test_system_status_avoids_sudo
 test_restart_uses_sudo_then_status
 test_user_tail_uses_user_unit_flag
